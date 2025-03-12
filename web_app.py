@@ -25,16 +25,21 @@ CHARTS_CONFIG = {
         "metrics": [
             {"name": "sales_count", "type": "bar", "axis": "y1", "title": "Количество продаж"},
             {"name": "average_price", "type": "scatter", "axis": "y2", "title": "Средняя цена", "color": "red"}
-        ]
+        ],
+        "yaxis": {"title": "Количество продаж", "side": "left"},
+        "yaxis2": {"title": "Средняя цена", "overlaying": "y", "side": "right"}
     },
-    "clean_names": {
-        "title": "Доля чистых имен",
+    "price_comparison": {
+        "title": "Сравнение цен и доля чистых имен",
         "metrics": [
-            {"name": "clean_ratio", "type": "scatter", "axis": "y1", "title": "Доля чистых имен", "color": "green"}
-        ]
+            {"name": "avg_price_clean", "type": "bar", "axis": "y1", "title": "Средняя цена (чистые)", "color": "blue"},
+            {"name": "avg_price_not_clean", "type": "bar", "axis": "y1", "title": "Средняя цена (нечистые)", "color": "red"},
+            {"name": "clean_ratio", "type": "scatter", "axis": "y2", "title": "Доля чистых имен", "color": "green"}
+        ],
+        "yaxis": {"title": "Средняя цена", "side": "left"},
+        "yaxis2": {"title": "Доля чистых имен", "overlaying": "y", "side": "right", "range": [0, 1]}
     }
 }
-
 
 def get_data(price_range):
     """Загрузка данных с группировкой по дням и фильтрацией по цене"""
@@ -43,9 +48,11 @@ def get_data(price_range):
     query = """
         SELECT 
             sale_date::DATE AS date,
-            COUNT(*) AS sales_count,
-            AVG(price) AS average_price,
-            AVG(CASE WHEN username !~ '[0-9_]' THEN 1 ELSE 0 END) AS clean_ratio
+            COUNT(username) AS sales_count,  -- Количество продаж
+            AVG(price) AS average_price,  -- Средняя цена всех имен
+            AVG(CASE WHEN username !~ '[0-9_]' THEN price END) AS avg_price_clean,  -- Средняя цена для "чистых" имен
+            AVG(CASE WHEN username ~ '[0-9_]' THEN price END) AS avg_price_not_clean,  -- Средняя цена для "нечистых" имен
+            AVG(CASE WHEN username !~ '[0-9_]' THEN 1 ELSE 0 END) AS clean_ratio  -- Доля "чистых" имен
         FROM public.sold_usernames
         WHERE price >= %s AND (%s IS NULL OR price < %s)
         GROUP BY date
@@ -53,7 +60,6 @@ def get_data(price_range):
     """
     params = (min_price, max_price, max_price)
     return pd.read_sql(query, engine, params=params)
-
 
 app = dash.Dash(__name__)
 
@@ -78,13 +84,17 @@ app.layout = html.Div([
     html.Label("Тип графика:"),
     dcc.Dropdown(
         id='chart-type-selector',
-        options=[{'label': v['title'], 'value': k} for k, v in CHARTS_CONFIG.items()],
-        value='sales',
+        options=[
+            {'label': 'Количество продаж и средняя цена', 'value': 'sales'},
+            {'label': 'Сравнение цен и доля чистых имен', 'value': 'price_comparison'}
+        ],
+        value='sales',  # Начальное значение
         clearable=False
     ),
 
     dcc.Graph(id="sales-chart")
 ])
+
 
 
 @app.callback(
@@ -95,7 +105,7 @@ app.layout = html.Div([
     Input("chart-type-selector", "value")
 )
 def update_chart(start_date, end_date, price_cluster, chart_type):
-    # Получаем и фильтруем данные
+    # Загрузка данных
     df = get_data(PRICE_CLUSTERS[price_cluster])
     df['date'] = pd.to_datetime(df['date'])
     filtered = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
@@ -110,6 +120,7 @@ def update_chart(start_date, end_date, price_cluster, chart_type):
                 x=filtered['date'],
                 y=filtered[metric['name']],
                 name=metric['title'],
+                marker_color=metric.get('color'),
                 yaxis=metric['axis']
             ))
         elif metric['type'] == 'scatter':
@@ -121,21 +132,17 @@ def update_chart(start_date, end_date, price_cluster, chart_type):
                 line=dict(color=metric.get('color'))
             ))
 
-    # Настраиваем оси
+    # Настройка осей
     fig.update_layout(
         title=f"{config['title']} ({price_cluster})",
         xaxis=dict(title="Дата"),
-        yaxis=dict(title=config['metrics'][0]['title'], side="left"),
-        yaxis2=dict(
-            title=config['metrics'][1]['title'] if len(config['metrics']) > 1 else None,
-            overlaying="y",
-            side="right"
-        ) if len(config['metrics']) > 1 else None,
-        legend=dict(x=0.1, y=1.1)
+        yaxis=config['yaxis'],
+        yaxis2=config.get('yaxis2'),  # Ось y2 может отсутствовать
+        legend=dict(x=0.1, y=1.1),
+        barmode='group'  # Столбцы группируются по датам
     )
 
     return fig
-
 
 if __name__ == "__main__":
     app.run_server(debug=True)
