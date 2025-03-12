@@ -1,2 +1,2 @@
 # SoldAnalysis
-Бот-аналитик проданных телеграм-имен | A bot to analyze usernames sold on Fragment
+Дашборд аналитики проданных телеграм-имен | A dashboard to analyze sold telegram usernames
