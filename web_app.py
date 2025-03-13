@@ -69,6 +69,31 @@ def get_data(price_range):
     params = (min_price, max_price, max_price)
     return pd.read_sql(query, engine, params=params)
 
+def get_avg_length_by_cluster():
+    """Новый запрос для средней длины по кластерам за всё время"""
+    query = """
+        WITH clusters AS (
+            SELECT 
+                CASE
+                    WHEN price >= 0 AND price < 25 THEN '0-25'
+                    WHEN price >= 25 AND price < 75 THEN '25-75'
+                    WHEN price >= 75 AND price < 400 THEN '75-400'
+                    WHEN price >= 400 THEN '400+'
+                END AS price_cluster,
+                LENGTH(username) as len
+            FROM public.sold_usernames
+        )
+        SELECT 
+            price_cluster,
+            AVG(len) AS avg_length,
+            COUNT(*) AS total_count
+        FROM clusters
+        WHERE price_cluster IS NOT NULL
+        GROUP BY price_cluster
+        ORDER BY price_cluster;
+    """
+    return pd.read_sql(query, engine)
+
 app = dash.Dash(__name__)
 
 app.layout = html.Div([
@@ -101,7 +126,13 @@ app.layout = html.Div([
         clearable=False
     ),
 
-    dcc.Graph(id="sales-chart")
+    dcc.Graph(id="sales-chart"),
+
+    # Новый раздел
+    html.Div([
+        html.H3("Анализ за всё время", style={'marginTop': '50px'}),
+        dcc.Graph(id="cluster-length-chart")
+    ])
 ])
 
 @app.callback(
@@ -144,6 +175,32 @@ def update_chart(start_date, end_date, price_cluster, chart_type):
         yaxis2=config.get('yaxis2'),
         legend=dict(x=0.1, y=1.1),
         barmode='group'
+    )
+
+    return fig
+
+@app.callback(
+    Output("cluster-length-chart", "figure"),
+    Input("price-cluster-selector", "value")  # Фиктивный триггер
+)
+def update_cluster_chart(_):
+    df = get_avg_length_by_cluster()
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df['price_cluster'],
+        y=df['avg_length'],
+        text=df['avg_length'].round(2),
+        textposition='auto',
+        marker_color='#4CAF50'
+    ))
+
+    fig.update_layout(
+        title="Средняя длина имени по ценовым кластерам",
+        xaxis_title="Ценовой кластер",
+        yaxis_title="Средняя длина имени",
+        hovermode="x unified",
+        showlegend=False
     )
 
     return fig
