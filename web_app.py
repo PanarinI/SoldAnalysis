@@ -1,6 +1,7 @@
 import dash
 from dash import dcc, html
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 from dash.dependencies import Input, Output
 from sqlalchemy import create_engine
@@ -47,6 +48,16 @@ CHARTS_CONFIG = {
         "yaxis": {"title": "Средняя длина", "side": "left"}
     }
 }
+def get_price_distribution(start_date=None, end_date=None):
+    """Загрузка данных о ценах для гистограммы"""
+    query = """
+        SELECT price
+        FROM public.sold_usernames
+        WHERE (%s IS NULL OR sale_date >= %s)
+          AND (%s IS NULL OR sale_date <= %s)
+    """
+    params = (start_date, start_date, end_date, end_date)
+    return pd.read_sql(query, engine, params=params)
 
 def get_data(price_range):
     """Загрузка данных с группировкой по дням и фильтрацией по цене"""
@@ -99,10 +110,31 @@ app = dash.Dash(__name__)
 app.layout = html.Div([
     html.H1("Анализ проданных Telegram-имен", style={'textAlign': 'center'}),
 
+    # Новый график: гистограмма распределения цен
+    html.Div([
+        html.H3("Распределение цен", style={'marginTop': '20px'}),
+        dcc.Graph(id="price-distribution-chart")
+    ]),
+
+    # Логарифмический слайдер для выбора диапазона цен
+    html.Div([
+        html.Label("Диапазон цен (логарифмический выбор):"),
+        dcc.RangeSlider(
+            id='price-range-slider',
+            min=0,  # Минимальное значение (логарифм от 1)
+            max=5,  # Максимальное значение (логарифм от 100000)
+            step=0.1,  # Шаг
+            value=[0, 3],  # Начальный диапазон (10^0 = 1, 10^3 = 1000)
+            marks={i: f"10^{i}" for i in range(6)},  # Метки на слайдере
+            tooltip={"placement": "bottom", "always_visible": True}
+        )
+    ]),
+
+    # Остальные элементы макета
     dcc.DatePickerRange(
         id='date-picker',
         display_format='YYYY-MM-DD',
-        start_date=pd.Timestamp.today() - pd.Timedelta(days=7),
+        start_date=pd.Timestamp.today() - pd.Timedelta(days=7),  # По умолчанию — последние 7 дней
         end_date=pd.Timestamp.today()
     ),
 
@@ -120,7 +152,7 @@ app.layout = html.Div([
         options=[
             {'label': 'Количество продаж и средняя цена', 'value': 'sales'},
             {'label': 'Сравнение цен и доля чистых имен', 'value': 'price_comparison'},
-            {'label': 'Длина имен', 'value': 'name_length'}  # Новая опция
+            {'label': 'Длина имен', 'value': 'name_length'}
         ],
         value='sales',
         clearable=False
@@ -128,7 +160,7 @@ app.layout = html.Div([
 
     dcc.Graph(id="sales-chart"),
 
-    # Новый раздел
+    # Раздел "Анализ за всё время"
     html.Div([
         html.H3("Анализ за всё время", style={'marginTop': '50px'}),
         dcc.Graph(id="cluster-length-chart")
@@ -201,6 +233,56 @@ def update_cluster_chart(_):
         yaxis_title="Средняя длина имени",
         hovermode="x unified",
         showlegend=False
+    )
+
+    return fig
+
+@app.callback(
+    Output("price-distribution-chart", "figure"),
+    Input("date-picker", "start_date"),
+    Input("date-picker", "end_date"),
+    Input("price-range-slider", "value")
+)
+def update_price_distribution(start_date, end_date, price_range):
+    # Преобразуем логарифмические значения слайдера в линейные
+    min_price = 10 ** price_range[0]
+    max_price = 10 ** price_range[1]
+
+    # Загрузка данных
+    df = get_price_distribution(start_date, end_date)
+
+    # Фильтрация данных
+    df_filtered = df[(df['price'] >= min_price) & (df['price'] <= max_price)]
+
+    # Рассчитываем размер бина
+    price_range_size = max_price - min_price
+    bin_size = price_range_size / 80  # Фиксированное количество бинов
+
+    # Создание гистограммы
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=df_filtered['price'],
+        xbins=dict(
+            start=min_price,
+            end=max_price,
+            size=bin_size  # Теперь размер бина всегда точный
+        ),
+        marker_color='#1f77b4',
+        opacity=0.75
+    ))
+
+    # Настройка оси X
+    fig.update_xaxes(
+        title="Цена",
+        range=[min_price, max_price],
+        tickformat=".1f"  # Формат для отображения дробных значений
+    )
+
+    # Настройка внешнего вида
+    fig.update_layout(
+        title=f"Распределение цен ({min_price:.1f}-{max_price:.1f}), Бин = {bin_size:.2f}",
+        yaxis_title="Количество продаж",
+        bargap=0.01
     )
 
     return fig
