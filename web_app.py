@@ -38,6 +38,13 @@ CHARTS_CONFIG = {
         ],
         "yaxis": {"title": "Средняя цена", "side": "left"},
         "yaxis2": {"title": "Доля чистых имен", "overlaying": "y", "side": "right", "range": [0, 1]}
+    },
+    "name_length": {
+        "title": "Средняя длина имен",
+        "metrics": [
+            {"name": "avg_name_length", "type": "bar", "axis": "y1", "title": "Средняя длина имени", "color": "blue"}
+        ],
+        "yaxis": {"title": "Средняя длина", "side": "left"}
     }
 }
 
@@ -48,11 +55,12 @@ def get_data(price_range):
     query = """
         SELECT 
             sale_date::DATE AS date,
-            COUNT(username) AS sales_count,  -- Количество продаж
-            AVG(price) AS average_price,  -- Средняя цена всех имен
-            AVG(CASE WHEN username !~ '[0-9_]' THEN price END) AS avg_price_clean,  -- Средняя цена для "чистых" имен
-            AVG(CASE WHEN username ~ '[0-9_]' THEN price END) AS avg_price_not_clean,  -- Средняя цена для "нечистых" имен
-            AVG(CASE WHEN username !~ '[0-9_]' THEN 1 ELSE 0 END) AS clean_ratio  -- Доля "чистых" имен
+            COUNT(username) AS sales_count,
+            AVG(price) AS average_price,
+            AVG(CASE WHEN username !~ '[0-9_]' THEN price END) AS avg_price_clean,
+            AVG(CASE WHEN username ~ '[0-9_]' THEN price END) AS avg_price_not_clean,
+            AVG(CASE WHEN username !~ '[0-9_]' THEN 1 ELSE 0 END) AS clean_ratio,
+            AVG(LENGTH(username)) AS avg_name_length  -- Добавлено вычисление длины
         FROM public.sold_usernames
         WHERE price >= %s AND (%s IS NULL OR price < %s)
         GROUP BY date
@@ -86,16 +94,15 @@ app.layout = html.Div([
         id='chart-type-selector',
         options=[
             {'label': 'Количество продаж и средняя цена', 'value': 'sales'},
-            {'label': 'Сравнение цен и доля чистых имен', 'value': 'price_comparison'}
+            {'label': 'Сравнение цен и доля чистых имен', 'value': 'price_comparison'},
+            {'label': 'Длина имен', 'value': 'name_length'}  # Новая опция
         ],
-        value='sales',  # Начальное значение
+        value='sales',
         clearable=False
     ),
 
     dcc.Graph(id="sales-chart")
 ])
-
-
 
 @app.callback(
     Output("sales-chart", "figure"),
@@ -105,12 +112,10 @@ app.layout = html.Div([
     Input("chart-type-selector", "value")
 )
 def update_chart(start_date, end_date, price_cluster, chart_type):
-    # Загрузка данных
     df = get_data(PRICE_CLUSTERS[price_cluster])
     df['date'] = pd.to_datetime(df['date'])
     filtered = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
 
-    # Создаем график
     fig = go.Figure()
     config = CHARTS_CONFIG[chart_type]
 
@@ -132,14 +137,13 @@ def update_chart(start_date, end_date, price_cluster, chart_type):
                 line=dict(color=metric.get('color'))
             ))
 
-    # Настройка осей
     fig.update_layout(
         title=f"{config['title']} ({price_cluster})",
         xaxis=dict(title="Дата"),
         yaxis=config['yaxis'],
-        yaxis2=config.get('yaxis2'),  # Ось y2 может отсутствовать
+        yaxis2=config.get('yaxis2'),
         legend=dict(x=0.1, y=1.1),
-        barmode='group'  # Столбцы группируются по датам
+        barmode='group'
     )
 
     return fig
