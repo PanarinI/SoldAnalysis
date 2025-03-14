@@ -164,7 +164,18 @@ app.layout = html.Div([
     html.Div([
         html.H3("Анализ за всё время", style={'marginTop': '50px'}),
         dcc.Graph(id="cluster-length-chart")
-    ])
+    ]),
+    # график: распределение продаж по часам
+    html.Div([
+        html.H3("Распределение продаж по часам", style={'marginTop': '20px'}),
+        dcc.Dropdown(
+            id='day-selector',
+            options=[{'label': 'Все дни', 'value': 'all'}],  # Изначально только "Все дни"
+            value='all',
+            clearable=False
+        ),
+        dcc.Graph(id="sales-by-hour-chart")
+    ]),
 ])
 
 @app.callback(
@@ -256,7 +267,7 @@ def update_price_distribution(start_date, end_date, price_range):
 
     # Рассчитываем размер бина
     price_range_size = max_price - min_price
-    bin_size = price_range_size / 80  # Фиксированное количество бинов
+    bin_size = price_range_size / 100  # Фиксированное количество бинов
 
     # Создание гистограммы
     fig = go.Figure()
@@ -286,6 +297,83 @@ def update_price_distribution(start_date, end_date, price_range):
     )
 
     return fig
+
+
+@app.callback(
+    Output("day-selector", "options"),
+    Input("date-picker", "start_date"),
+    Input("date-picker", "end_date")
+)
+def update_day_selector(start_date, end_date):
+    # Загружаем данные из базы данных
+    query = """
+        SELECT DISTINCT sale_date::DATE AS sale_date
+        FROM public.sold_usernames
+        WHERE (%s IS NULL OR sale_date >= %s)
+          AND (%s IS NULL OR sale_date <= %s)
+        ORDER BY sale_date;
+    """
+    params = (start_date, start_date, end_date, end_date)
+    df = pd.read_sql(query, engine, params=params)
+
+    # Формируем список опций для выпадающего списка
+    options = [{'label': 'Все дни', 'value': 'all'}] + \
+              [{'label': str(day), 'value': str(day)} for day in df['sale_date'].unique()]
+
+    return options
+
+@app.callback(
+    Output("sales-by-hour-chart", "figure"),
+    Input("day-selector", "value"),
+    Input("date-picker", "start_date"),
+    Input("date-picker", "end_date")
+)
+def update_sales_by_hour_chart(selected_day, start_date, end_date):
+    # Загружаем данные из базы данных
+    query = """
+        SELECT 
+            sale_date,
+            EXTRACT(HOUR FROM sale_date) AS sale_hour, 
+            COUNT(*) AS sales_count
+        FROM public.sold_usernames
+        WHERE (%s IS NULL OR sale_date >= %s)
+          AND (%s IS NULL OR sale_date <= %s)
+        GROUP BY sale_hour, sale_date
+        ORDER BY sale_hour;
+    """
+    params = (start_date, start_date, end_date, end_date)
+    df = pd.read_sql(query, engine, params=params)
+
+    # Приводим даты к московскому времени
+    df['sale_date'] = df['sale_date'].dt.tz_localize('UTC').dt.tz_convert('Europe/Moscow')
+    df['sale_hour'] = df['sale_date'].dt.hour
+
+    # Фильтруем данные, если выбран конкретный день
+    if selected_day != 'all':
+        selected_day = pd.to_datetime(selected_day).date()
+        df = df[df['sale_date'].dt.date == selected_day]
+
+    # Группируем данные по часам
+    sales_by_hour = df.groupby('sale_hour')['sales_count'].sum()
+
+    # Строим график
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=sales_by_hour.index,
+        y=sales_by_hour.values,
+        marker_color='#4CAF50'
+    ))
+
+    fig.update_layout(
+        title="Распределение продаж по часам" + ("" if selected_day == 'all' else f" за {selected_day}"),
+        xaxis_title="Часы суток",
+        yaxis_title="Количество продаж",
+        xaxis=dict(tickmode='linear', tick0=0, dtick=1),
+        bargap=0.01
+    )
+
+    return fig
+
 
 if __name__ == "__main__":
     app.run_server(debug=True)

@@ -4,3 +4,4 @@ plotly
 SQLAlchemy
 scikit-learn
 seaborn
+ipywidgets
