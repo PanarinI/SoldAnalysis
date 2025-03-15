@@ -43,6 +43,8 @@ def parse_data():
         username_element = row.find("div", class_="table-cell-value tm-value")
         if username_element:
             username = username_element.text.strip()
+            # Удаляем символ @ из начала имени
+            username = username.lstrip('@')
         else:
             username = None
             logging.warning("Юзернейм не найден в строке.")

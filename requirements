@@ -5,3 +5,6 @@ SQLAlchemy
 scikit-learn
 seaborn
 ipywidgets
+statsmodels
+scipyjup
+scikit_posthocs

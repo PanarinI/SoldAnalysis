@@ -1,7 +1,7 @@
 CREATE TABLE sold_usernames (
     id SERIAL PRIMARY KEY,
     username VARCHAR(255) NOT NULL,
-    price VARCHAR(50) NOT NULL,
+    price NUMERIC NOT NULL,
     sale_date TIMESTAMP NOT NULL
 );
 
