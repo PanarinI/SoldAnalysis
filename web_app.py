@@ -2,7 +2,7 @@ import dash
 from dash import dcc, html
 import pandas as pd
 import numpy as np
-import plotly.graph_objects as go
+import distrib_html.graph_objects as go
 from dash.dependencies import Input, Output
 from sqlalchemy import create_engine
 import re
